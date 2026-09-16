@@ -14,10 +14,12 @@ from helpers import tan_wcs
 from PIL import Image
 
 from swiftcat.utils.plot import (
+    EXCLUDED_REGION_ALPHA,
     draw_source_circles,
     get_source_pixel_positions,
     load_image_data_and_wcs,
     plot_image_with_sources,
+    shade_excluded_region,
 )
 
 
@@ -94,6 +96,28 @@ class TestDrawSourceCircles(unittest.TestCase):
         plt.close("all")
 
 
+class TestShadeExcludedRegion(unittest.TestCase):
+    """
+    Class for testing shade_excluded_region
+    """
+
+    def test_shades_only_excluded_pixels(self):
+        """
+        :return: None
+        """
+        _, ax = plt.subplots()
+        mask = np.array([[True, False], [False, True]])
+
+        shade_excluded_region(ax, mask)
+
+        overlay = ax.images[-1].get_array()
+        self.assertEqual(overlay[0, 0, 3], 0.0)
+        self.assertEqual(overlay[1, 1, 3], 0.0)
+        self.assertEqual(overlay[0, 1, 3], EXCLUDED_REGION_ALPHA)
+        self.assertEqual(overlay[1, 0, 3], EXCLUDED_REGION_ALPHA)
+        plt.close("all")
+
+
 class TestPlotImageWithSources(unittest.TestCase):
     """
     Class for testing plot_image_with_sources end-to-end against a
@@ -151,6 +175,28 @@ class TestPlotImageWithSources(unittest.TestCase):
         self.assertEqual(out_path, explicit_path)
         with Image.open(explicit_path) as img:
             self.assertEqual(img.format, "PNG")
+
+    def test_accepts_raw_subexposures_and_still_produces_a_valid_image(self):
+        """
+        :return: None
+        """
+        wcs_a = tan_wcs(crpix=[1, 1], crval=[10, 20])
+        wcs_b = tan_wcs(crpix=[26, 1], crval=[10, 20])
+        raw_path = Path(self.tmp_dir.name) / "raw.fits"
+        fits.HDUList(
+            [
+                fits.PrimaryHDU(),
+                fits.ImageHDU(data=np.ones((50, 50)), header=wcs_a.to_header()),
+                fits.ImageHDU(data=np.ones((50, 50)), header=wcs_b.to_header()),
+            ]
+        ).writeto(raw_path)
+
+        out_path = plot_image_with_sources(
+            self.image_path, self.sources, raw_subexposures=raw_path
+        )
+
+        with Image.open(out_path) as img:
+            img.verify()
 
 
 if __name__ == "__main__":

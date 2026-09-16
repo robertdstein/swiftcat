@@ -21,7 +21,9 @@ from astropy.io import fits
 from astropy.visualization import ImageNormalize, ZScaleInterval
 from astropy.wcs import WCS
 from astropy.wcs.utils import proj_plane_pixel_scales
+from matplotlib.colors import to_rgba
 
+from swiftcat.detect import overlap_mask
 from swiftcat.utils.regions import (
     CATEGORY_COL,
     CATEGORY_COLORS,
@@ -32,6 +34,9 @@ from swiftcat.utils.regions import (
 )
 
 # pylint: enable=wrong-import-position
+
+EXCLUDED_REGION_COLOR = "black"
+EXCLUDED_REGION_ALPHA = 0.6
 
 
 def load_image_data_and_wcs(image_path: Path) -> tuple[np.ndarray, WCS]:
@@ -92,9 +97,27 @@ def draw_source_circles(
         )
 
 
+def shade_excluded_region(ax: plt.Axes, mask: np.ndarray) -> None:
+    """
+    Function to shade, with a semi-transparent overlay, the part of an
+    image NOT covered by every sub-exposure - the region find_sources
+    drops detections from when given raw_subexposures
+
+    :param ax: Axes to draw on
+    :param mask: Boolean coverage mask, True where covered by every
+        sub-exposure (as returned by overlap_mask)
+    :return: None
+    """
+    overlay = np.zeros((*mask.shape, 4))
+    overlay[..., :3] = to_rgba(EXCLUDED_REGION_COLOR)[:3]
+    overlay[..., 3] = np.where(mask, 0.0, EXCLUDED_REGION_ALPHA)
+    ax.imshow(overlay, origin="lower")
+
+
 def plot_image_with_sources(
     image_path: Path,
     sources: pd.DataFrame,
+    raw_subexposures: Path | None = None,
     out_path: Path | None = None,
     radius_arcsec: float = DEFAULT_RADIUS_ARCSEC,
 ) -> Path:
@@ -107,6 +130,9 @@ def plot_image_with_sources(
     :param image_path: Path to the image
     :param sources: Table of sources, as produced by crossmatch_ps1 -
         needs ALPHA_J2000/DELTA_J2000 (degrees) and category columns
+    :param raw_subexposures: Raw multi-extension sky image the summed
+        image was created from; if given, the region outside every
+        sub-exposure's coverage (as excluded by find_sources) is shaded
     :param out_path: Path to save the plot to; defaults to image_path
         with a .jpg extension
     :param radius_arcsec: Circle radius to draw around each source
@@ -123,6 +149,8 @@ def plot_image_with_sources(
     fig, ax = plt.subplots()
     norm = ImageNormalize(data, interval=ZScaleInterval())
     ax.imshow(data, origin="lower", cmap="gray", norm=norm)
+    if raw_subexposures is not None:
+        shade_excluded_region(ax, overlap_mask(wcs, data.shape, raw_subexposures))
     draw_source_circles(ax, xs, ys, sources[CATEGORY_COL], radius_pix)
     ax.set_axis_off()
 
