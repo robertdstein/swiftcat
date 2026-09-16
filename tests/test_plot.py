@@ -76,7 +76,7 @@ class TestDrawSourceCircles(unittest.TestCase):
     Class for testing draw_source_circles
     """
 
-    def test_draws_one_circle_per_source_with_correct_colors(self):
+    def test_draws_one_circle_per_source_with_correct_colors_and_radii(self):
         """
         :return: None
         """
@@ -84,15 +84,16 @@ class TestDrawSourceCircles(unittest.TestCase):
         xs = np.array([1.0, 2.0])
         ys = np.array([3.0, 4.0])
         categories = pd.Series(["new", "known_star"])
+        radii_pix = np.array([5.0, 8.0])
 
-        draw_source_circles(ax, xs, ys, categories, radius_pix=5.0)
+        draw_source_circles(ax, xs, ys, categories, radii_pix)
 
         patches = ax.patches
         self.assertEqual(len(patches), 2)
         self.assertEqual(patches[0].get_edgecolor()[:3], (1.0, 0.0, 0.0))  # red
-        self.assertEqual(
-            patches[1].get_edgecolor()[:3], (0.0, 0.50196078431372548, 0.0)
-        )
+        self.assertEqual(patches[1].get_edgecolor()[:3], (0.0, 1.0, 1.0))  # cyan
+        self.assertEqual(patches[0].radius, 5.0)
+        self.assertEqual(patches[1].radius, 8.0)
         plt.close("all")
 
 
@@ -138,6 +139,7 @@ class TestPlotImageWithSources(unittest.TestCase):
             {
                 "ALPHA_J2000": [10.0, 10.001],
                 "DELTA_J2000": [20.0, 20.001],
+                "FLUX_RADIUS": [2.0, 3.0],
                 "category": ["new", "known_star"],
             }
         )

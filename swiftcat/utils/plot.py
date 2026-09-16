@@ -20,7 +20,6 @@ from astropy.coordinates import SkyCoord
 from astropy.io import fits
 from astropy.visualization import ImageNormalize, ZScaleInterval
 from astropy.wcs import WCS
-from astropy.wcs.utils import proj_plane_pixel_scales
 from matplotlib.colors import to_rgba
 
 from swiftcat.detect import overlap_mask
@@ -29,14 +28,18 @@ from swiftcat.utils.regions import (
     CATEGORY_COLORS,
     DEC_COL,
     DEFAULT_COLOR,
-    DEFAULT_RADIUS_ARCSEC,
     RA_COL,
 )
 
 # pylint: enable=wrong-import-position
 
-EXCLUDED_REGION_COLOR = "black"
-EXCLUDED_REGION_ALPHA = 0.6
+EXCLUDED_REGION_COLOR = "red"
+EXCLUDED_REGION_ALPHA = 0.5
+
+# SExtractor's own half-light radius column, scaled up for visibility -
+# used directly, each source's marker is barely a few pixels across.
+RADIUS_COL = "FLUX_RADIUS"
+RADIUS_SCALE = 6.0
 
 
 def load_image_data_and_wcs(image_path: Path) -> tuple[np.ndarray, WCS]:
@@ -74,26 +77,24 @@ def draw_source_circles(
     xs: np.ndarray,
     ys: np.ndarray,
     categories: pd.Series,
-    radius_pix: float,
+    radii_pix: np.ndarray,
 ) -> None:
     """
     Function to draw a colour-coded circle at each source's pixel
-    position, colour-coded by category (matching write_region_file's
-    colour scheme)
+    position, sized to that source's own radius and colour-coded by
+    category (matching write_region_file's colour scheme)
 
     :param ax: Axes to draw on
     :param xs: x pixel positions
     :param ys: y pixel positions
     :param categories: Classification of each source
-    :param radius_pix: Circle radius, in pixels
+    :param radii_pix: Circle radius for each source, in pixels
     :return: None
     """
-    for x, y, category in zip(xs, ys, categories):
+    for x, y, category, radius in zip(xs, ys, categories, radii_pix):
         color = CATEGORY_COLORS.get(category, DEFAULT_COLOR)
         ax.add_patch(
-            plt.Circle(
-                (x, y), radius_pix, edgecolor=color, facecolor="none", linewidth=1.2
-            )
+            plt.Circle((x, y), radius, edgecolor=color, facecolor="none", linewidth=1.4)
         )
 
 
@@ -119,39 +120,38 @@ def plot_image_with_sources(
     sources: pd.DataFrame,
     raw_subexposures: Path | None = None,
     out_path: Path | None = None,
-    radius_arcsec: float = DEFAULT_RADIUS_ARCSEC,
 ) -> Path:
     """
     Function to render a quicklook image of a UVOT observation with each
     classified source circled, colour-coded by category (matching
-    write_region_file's colour scheme), and save it as a raster image -
-    format is inferred from out_path's extension (e.g. .jpg, .png)
+    write_region_file's colour scheme) and sized by its own FLUX_RADIUS,
+    and save it as a raster image - format is inferred from out_path's
+    extension (e.g. .jpg, .png)
 
     :param image_path: Path to the image
-    :param sources: Table of sources, as produced by crossmatch_ps1 -
-        needs ALPHA_J2000/DELTA_J2000 (degrees) and category columns
+    :param sources: Table of sources, as produced by find_sources -
+        needs ALPHA_J2000/DELTA_J2000 (degrees), FLUX_RADIUS (pixels),
+        and category columns
     :param raw_subexposures: Raw multi-extension sky image the summed
         image was created from; if given, the region outside every
         sub-exposure's coverage (as excluded by find_sources) is shaded
     :param out_path: Path to save the plot to; defaults to image_path
         with a .jpg extension
-    :param radius_arcsec: Circle radius to draw around each source
     :return: Path the plot was saved to
     """
     if out_path is None:
         out_path = image_path.with_suffix(".jpg")
 
     data, wcs = load_image_data_and_wcs(image_path)
-    pixel_scale_deg = proj_plane_pixel_scales(wcs).mean()
-    radius_pix = (radius_arcsec / 3600.0) / pixel_scale_deg
     xs, ys = get_source_pixel_positions(sources, wcs)
+    radii_pix = sources[RADIUS_COL].to_numpy() * RADIUS_SCALE
 
     fig, ax = plt.subplots()
     norm = ImageNormalize(data, interval=ZScaleInterval())
     ax.imshow(data, origin="lower", cmap="gray", norm=norm)
     if raw_subexposures is not None:
         shade_excluded_region(ax, overlap_mask(wcs, data.shape, raw_subexposures))
-    draw_source_circles(ax, xs, ys, sources[CATEGORY_COL], radius_pix)
+    draw_source_circles(ax, xs, ys, sources[CATEGORY_COL], radii_pix)
     ax.set_axis_off()
 
     fig.savefig(out_path, dpi=150, bbox_inches="tight")

@@ -8,11 +8,11 @@ from pathlib import Path
 import pandas as pd
 
 DEFAULT_RADIUS_ARCSEC = 5.0
-DEFAULT_COLOR = "magenta"
+DEFAULT_COLOR = "orange"
 CATEGORY_COLORS = {
     "new": "red",
-    "known_star": "green",
-    "known_galaxy": "blue",
+    "known_star": "cyan",
+    "known_galaxy": "magenta",
     "known_unclear": "yellow",
 }
 
