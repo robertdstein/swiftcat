@@ -75,7 +75,7 @@ def run_sextractor(image_path: Path, out_cat: Path) -> tuple[pd.DataFrame, str]:
     return cat, log_text
 
 
-def _get_sub_exposure_coverage(
+def get_sub_exposure_coverage(
     sub_wcs: WCS, sky: SkyCoord, sub_data: np.ndarray
 ) -> np.ndarray:
     """
@@ -124,7 +124,7 @@ def overlap_mask(
                 continue
             n_sub += 1
             sub_wcs = WCS(hdu.header)
-            coverage += _get_sub_exposure_coverage(sub_wcs, sky, hdu.data).astype(int)
+            coverage += get_sub_exposure_coverage(sub_wcs, sky, hdu.data).astype(int)
 
     if n_sub == 0:
         raise ValueError(f"No image extensions found in {raw_subexposures}")
@@ -164,7 +164,7 @@ def check_failure(data: np.ndarray, cat: pd.DataFrame, log_text: str) -> bool:
     return n_missing >= FAILURE_CHECK_MIN_MISSING
 
 
-def _get_detections_in_overlap_region(
+def get_detections_in_overlap_region(
     cat: pd.DataFrame, mask: np.ndarray, shape: tuple[int, int]
 ) -> np.ndarray:
     """
@@ -221,7 +221,7 @@ def find_sources(
     )
     if raw_subexposures is not None:
         mask = overlap_mask(wcs, (ny, nx), raw_subexposures)
-        keep &= _get_detections_in_overlap_region(cat, mask, (ny, nx))
+        keep &= get_detections_in_overlap_region(cat, mask, (ny, nx))
     cat = cat.loc[keep].reset_index(drop=True)
 
     cat["is_point_source"] = (cat["CLASS_STAR"] >= CLASS_STAR_MIN) & (

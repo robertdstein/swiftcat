@@ -38,7 +38,7 @@ def field_center_and_radius(
     return center, radius
 
 
-def _get_field_wcs_and_shape(image_path: Path) -> tuple[WCS, tuple[int, int]]:
+def get_field_wcs_and_shape(image_path: Path) -> tuple[WCS, tuple[int, int]]:
     """
     Function to get the WCS and pixel shape of a UVOT image's first
     data-bearing extension
@@ -51,7 +51,7 @@ def _get_field_wcs_and_shape(image_path: Path) -> tuple[WCS, tuple[int, int]]:
         return WCS(hdu.header), hdu.data.shape
 
 
-def _query_ps1_catalog(
+def query_ps1_catalog(
     wcs: WCS, shape: tuple[int, int], client: BoomClient
 ) -> tuple[SkyCoord, np.ndarray]:
     """
@@ -94,9 +94,9 @@ def crossmatch_ps1(
     :param client: Optional shared BoomClient
     :return: cat with an added `category` column
     """
-    wcs, shape = _get_field_wcs_and_shape(image_path)
+    wcs, shape = get_field_wcs_and_shape(image_path)
     client = client or BoomClient()
-    ps1_coords, ps_score = _query_ps1_catalog(wcs, shape, client)
+    ps1_coords, ps_score = query_ps1_catalog(wcs, shape, client)
 
     category = np.full(len(cat), "new", dtype=object)
     if len(cat) > 0 and len(ps1_coords) > 0:
