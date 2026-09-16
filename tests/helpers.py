@@ -4,7 +4,10 @@ unittest's discovery only picks up test*.py files).
 """
 
 import shutil
+from pathlib import Path
 
+import numpy as np
+from astropy.io import fits
 from astropy.wcs import WCS
 from blastwave.errors import BOOMCredentialsError
 from blastwave.query.boom import BoomClient
@@ -39,6 +42,24 @@ def tan_wcs(crpix: list[float], crval: list[float], cdelt: float = 0.001) -> WCS
     wcs.wcs.crval = crval
     wcs.wcs.ctype = ["RA---TAN", "DEC--TAN"]
     return wcs
+
+
+def write_single_extension_fits(
+    image_path: Path, wcs: WCS, data: np.ndarray | None = None
+) -> None:
+    """
+    Function to write a minimal single-extension FITS file for tests
+
+    :param image_path: Path to write the FITS file to
+    :param wcs: WCS to embed in the extension header
+    :param data: Pixel data; defaults to a 10x10 zero array
+    :return: None
+    """
+    if data is None:
+        data = np.zeros((10, 10))
+    fits.HDUList(
+        [fits.PrimaryHDU(), fits.ImageHDU(data=data, header=wcs.to_header())]
+    ).writeto(image_path)
 
 
 def boom_reachable(ra: float = 250.0767333333, dec: float = 26.9258638889) -> bool:

@@ -21,6 +21,7 @@ from astropy.io import fits
 from astropy.visualization import ImageNormalize, ZScaleInterval
 from astropy.wcs import WCS
 from matplotlib.colors import to_rgba
+from matplotlib.lines import Line2D
 
 from swiftcat.detect import overlap_mask
 from swiftcat.utils.regions import (
@@ -29,17 +30,14 @@ from swiftcat.utils.regions import (
     DEC_COL,
     DEFAULT_COLOR,
     RA_COL,
+    RADIUS_COL,
+    RADIUS_SCALE,
 )
 
 # pylint: enable=wrong-import-position
 
 EXCLUDED_REGION_COLOR = "red"
 EXCLUDED_REGION_ALPHA = 0.5
-
-# SExtractor's own half-light radius column, scaled up for visibility -
-# used directly, each source's marker is barely a few pixels across.
-RADIUS_COL = "FLUX_RADIUS"
-RADIUS_SCALE = 6.0
 
 
 def load_image_data_and_wcs(image_path: Path) -> tuple[np.ndarray, WCS]:
@@ -53,6 +51,20 @@ def load_image_data_and_wcs(image_path: Path) -> tuple[np.ndarray, WCS]:
     with fits.open(image_path) as hdul:
         hdu = next(h for h in hdul if h.data is not None)
         return hdu.data.astype(float), WCS(hdu.header)
+
+
+def get_object_and_target_id(image_path: Path) -> tuple[str, str]:
+    """
+    Function to read the target name and ID from a UVOT image's header
+
+    :param image_path: Path to the image
+    :return: (OBJECT, TARG_ID), as strings ("unknown" if a keyword is
+        missing)
+    """
+    with fits.open(image_path) as hdul:
+        hdu = next(h for h in hdul if h.data is not None)
+        header = hdu.header
+    return str(header.get("OBJECT", "unknown")), str(header.get("TARG_ID", "unknown"))
 
 
 def get_source_pixel_positions(
@@ -98,6 +110,31 @@ def draw_source_circles(
         )
 
 
+def add_category_legend(ax: plt.Axes, categories: pd.Series) -> None:
+    """
+    Function to add a legend listing each category present, its colour,
+    and how many sources fall into it
+
+    :param ax: Axes to add the legend to
+    :param categories: Classification of each source
+    :return: None
+    """
+    handles = [
+        Line2D(
+            [],
+            [],
+            marker="o",
+            linestyle="none",
+            markerfacecolor="none",
+            markeredgecolor=CATEGORY_COLORS.get(category, DEFAULT_COLOR),
+            markersize=8,
+            label=f"{category} ({count})",
+        )
+        for category, count in categories.value_counts().items()
+    ]
+    ax.legend(handles=handles, loc="upper right", fontsize="small", framealpha=0.7)
+
+
 def shade_excluded_region(ax: plt.Axes, mask: np.ndarray) -> None:
     """
     Function to shade, with a semi-transparent overlay, the part of an
@@ -125,8 +162,9 @@ def plot_image_with_sources(
     Function to render a quicklook image of a UVOT observation with each
     classified source circled, colour-coded by category (matching
     write_region_file's colour scheme) and sized by its own FLUX_RADIUS,
-    and save it as a raster image - format is inferred from out_path's
-    extension (e.g. .jpg, .png)
+    titled with the target name/ID and legended with per-category
+    counts, and save it as a raster image - format is inferred from
+    out_path's extension (e.g. .jpg, .png)
 
     :param image_path: Path to the image
     :param sources: Table of sources, as produced by find_sources -
@@ -143,6 +181,7 @@ def plot_image_with_sources(
         out_path = image_path.with_suffix(".jpg")
 
     data, wcs = load_image_data_and_wcs(image_path)
+    obj, targ_id = get_object_and_target_id(image_path)
     xs, ys = get_source_pixel_positions(sources, wcs)
     radii_pix = sources[RADIUS_COL].to_numpy() * RADIUS_SCALE
 
@@ -152,6 +191,8 @@ def plot_image_with_sources(
     if raw_subexposures is not None:
         shade_excluded_region(ax, overlap_mask(wcs, data.shape, raw_subexposures))
     draw_source_circles(ax, xs, ys, sources[CATEGORY_COL], radii_pix)
+    add_category_legend(ax, sources[CATEGORY_COL])
+    ax.set_title(f"{obj} (TARG_ID {targ_id})")
     ax.set_axis_off()
 
     fig.savefig(out_path, dpi=150, bbox_inches="tight")

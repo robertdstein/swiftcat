@@ -10,12 +10,14 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 from astropy.io import fits
-from helpers import tan_wcs
+from helpers import tan_wcs, write_single_extension_fits
 from PIL import Image
 
 from swiftcat.utils.plot import (
     EXCLUDED_REGION_ALPHA,
+    add_category_legend,
     draw_source_circles,
+    get_object_and_target_id,
     get_source_pixel_positions,
     load_image_data_and_wcs,
     plot_image_with_sources,
@@ -48,6 +50,72 @@ class TestLoadImageDataAndWcs(unittest.TestCase):
 
         np.testing.assert_array_equal(data_out, data_in)
         self.assertEqual(wcs_out.wcs.ctype[0], "RA---TAN")
+
+
+class TestGetObjectAndTargetId(unittest.TestCase):
+    """
+    Class for testing get_object_and_target_id against a genuine FITS
+    file
+    """
+
+    def test_reads_object_and_targ_id(self):
+        """
+        :return: None
+        """
+        wcs = tan_wcs(crpix=[1, 1], crval=[10, 20])
+        header = wcs.to_header()
+        header["OBJECT"] = "AT2025abcr"
+        header["TARG_ID"] = 3000183
+
+        with TemporaryDirectory() as tmp_dir:
+            image_path = Path(tmp_dir) / "image.fits"
+            fits.HDUList(
+                [
+                    fits.PrimaryHDU(),
+                    fits.ImageHDU(data=np.zeros((10, 10)), header=header),
+                ]
+            ).writeto(image_path)
+
+            obj, targ_id = get_object_and_target_id(image_path)
+
+        self.assertEqual(obj, "AT2025abcr")
+        self.assertEqual(targ_id, "3000183")
+
+    def test_missing_keywords_fall_back_to_unknown(self):
+        """
+        :return: None
+        """
+        wcs = tan_wcs(crpix=[1, 1], crval=[10, 20])
+
+        with TemporaryDirectory() as tmp_dir:
+            image_path = Path(tmp_dir) / "image.fits"
+            write_single_extension_fits(image_path, wcs)
+
+            obj, targ_id = get_object_and_target_id(image_path)
+
+        self.assertEqual(obj, "unknown")
+        self.assertEqual(targ_id, "unknown")
+
+
+class TestAddCategoryLegend(unittest.TestCase):
+    """
+    Class for testing add_category_legend
+    """
+
+    def test_legend_labels_include_counts(self):
+        """
+        :return: None
+        """
+        _, ax = plt.subplots()
+        categories = pd.Series(
+            ["known_star", "known_star", "new", "known_galaxy", "known_star"]
+        )
+
+        add_category_legend(ax, categories)
+
+        labels = {t.get_text() for t in ax.get_legend().get_texts()}
+        self.assertEqual(labels, {"known_star (3)", "new (1)", "known_galaxy (1)"})
+        plt.close("all")
 
 
 class TestGetSourcePixelPositions(unittest.TestCase):
