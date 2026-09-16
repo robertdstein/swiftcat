@@ -28,6 +28,7 @@ dev = [
     "pylint == 3.3.7",
     "coveralls",
     "pre-commit",
+    "regions",
 ]
 
 [project.urls]
