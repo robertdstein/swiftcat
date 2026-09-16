@@ -7,6 +7,7 @@ import subprocess
 from pathlib import Path
 
 import numpy as np
+import pandas as pd
 from astropy.io import fits
 from astropy.table import Table
 from astropy.wcs import WCS
@@ -26,7 +27,7 @@ ELLIPTICITY_MAX = 0.3
 EDGE_BUFFER_PIX = 10
 
 
-def run_sextractor(image_path: Path, out_cat: Path) -> tuple[Table, str]:
+def run_sextractor(image_path: Path, out_cat: Path) -> tuple[pd.DataFrame, str]:
     """
     Function to run SExtractor on a UVOT image
 
@@ -62,10 +63,11 @@ def run_sextractor(image_path: Path, out_cat: Path) -> tuple[Table, str]:
         text=True,
     )
     log_text = (result.stdout or "") + (result.stderr or "")
-    return Table.read(out_cat, format="ascii.sextractor"), log_text
+    cat = Table.read(out_cat, format="ascii.sextractor").to_pandas()
+    return cat, log_text
 
 
-def overlap_mask(
+def overlap_mask(  # pylint: disable=too-many-locals
     wcs: WCS, shape: tuple[int, int], raw_subexposures: Path
 ) -> np.ndarray:
     """
@@ -109,9 +111,9 @@ def overlap_mask(
     return coverage.reshape(ny, nx) == n_sub
 
 
-def check_failure(
+def check_failure(  # pylint: disable=too-many-arguments,too-many-positional-arguments
     data: np.ndarray,
-    cat: Table,
+    cat: pd.DataFrame,
     log_text: str,
     n_check: int = 8,
     match_radius_px: float = 15.0,
@@ -153,7 +155,9 @@ def check_failure(
     return n_missing >= min_missing
 
 
-def find_sources(image_path: Path, raw_subexposures: Path | None = None) -> Table:
+def find_sources(  # pylint: disable=too-many-locals
+    image_path: Path, raw_subexposures: Path | None = None
+) -> pd.DataFrame:
     """
     Function to detect and shape-classify every source in a UVOT image
 
@@ -193,13 +197,13 @@ def find_sources(image_path: Path, raw_subexposures: Path | None = None) -> Tabl
         in_region = np.zeros(len(cat), dtype=bool)
         in_region[valid] = mask[iy[valid], ix[valid]]
         keep &= in_region
-    cat = cat[keep]
+    cat = cat.loc[keep].reset_index(drop=True)
 
     cat["is_point_source"] = (cat["CLASS_STAR"] >= CLASS_STAR_MIN) & (
         cat["ELLIPTICITY"] <= ELLIPTICITY_MAX
     )
     cat["sextractor_likely_failed"] = likely_failed
-    # Also stored in .meta (unlike the column, readable even on a 0-row
+    # Also stored in .attrs (unlike the column, readable even on a 0-row
     # table - a failed epoch typically has few or no surviving detections).
-    cat.meta["sextractor_likely_failed"] = likely_failed
+    cat.attrs["sextractor_likely_failed"] = likely_failed
     return cat

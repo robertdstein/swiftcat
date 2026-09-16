@@ -8,9 +8,9 @@ from pathlib import Path
 
 import astropy.units as u
 import numpy as np
+import pandas as pd
 from astropy.coordinates import SkyCoord
 from astropy.io import fits
-from astropy.table import Table
 from astropy.wcs import WCS
 from blastwave.query.boom import BoomClient
 
@@ -38,9 +38,9 @@ def field_center_and_radius(
     return center, radius
 
 
-def crossmatch_ps1(
-    cat: Table, image_path: Path, client: BoomClient | None = None
-) -> Table:
+def crossmatch_ps1(  # pylint: disable=too-many-locals
+    cat: pd.DataFrame, image_path: Path, client: BoomClient | None = None
+) -> pd.DataFrame:
     """
     Function to tag each detection as known_star / known_galaxy /
     known_unclear / new, from a fresh PS1 pull for this image's own field
