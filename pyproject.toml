@@ -1,0 +1,65 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "swiftcat"
+version = "0.1.0"
+description = "Detect and classify sources in Swift UVOT images"
+readme = "README.md"
+license = { text = "MIT" }
+authors = [
+    { name = "Robert David Stein", email = "robertdavidstein@gmail.com" },
+]
+requires-python = ">=3.10"
+dependencies = [
+    "astropy",
+    "numpy",
+    "scipy",
+    "blastwave",
+]
+
+[project.optional-dependencies]
+dev = [
+    "black == 25.1.0",
+    "isort == 6.0.1",
+    "pylint == 3.3.7",
+    "coveralls",
+    "pre-commit",
+]
+
+[project.urls]
+Homepage = "https://github.com/robertdstein/swiftcat"
+
+[tool.setuptools.packages.find]
+include = ["swiftcat*"]
+
+[tool.setuptools.package-data]
+swiftcat = ["config/*"]
+
+[tool.isort]
+profile = "black"
+
+[tool.pylint.format]
+max-line-length = "88"
+disable = ["logging-fstring-interpolation"]
+good-names = ["ax", "ra", "df", "pi", "i"]
+exclude-too-few-public-methods = ["pydantic.*"]
+extension-pkg-whitelist = ["pydantic"]
+
+[tool.coverage.run]
+branch = true
+source = ["swiftcat"]
+
+[tool.coverage.report]
+exclude_also = [
+    "def __repr__",
+    "if self\\.debug",
+    "raise AssertionError",
+    "raise NotImplementedError",
+    "if 0:",
+    "if __name__ == .__main__.:",
+    "@(abc\\.)?abstractmethod",
+    ]
+
+ignore_errors = true
