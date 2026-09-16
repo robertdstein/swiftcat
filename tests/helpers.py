@@ -18,10 +18,12 @@ from swiftcat.paths import get_image_dir
 # A real, already-reduced UVOT observation available locally (from
 # uvotredux's own output) - used for genuine end-to-end runs rather than
 # a synthetic/mocked catalog. If a machine doesn't have it (e.g. a future
-# CI runner), tests relying on it skip rather than fail.
-REAL_OBS_DIR = get_image_dir() / "AT2025mwm" / "00019851001" / "uvot" / "image"
-REAL_IMAGE = REAL_OBS_DIR / "UW1.fits"
-REAL_SUBEXPOSURES = REAL_OBS_DIR / "sw00019851001uw1_sk.img"
+# CI runner), tests relying on it skip rather than fail. This is the
+# same AT2025abcr exposure used to tune detect.py's quality cuts and to
+# demo the plotting/region-file utilities.
+REAL_OBS_DIR = get_image_dir() / "AT2025abcr" / "03000183001" / "uvot" / "image"
+REAL_IMAGE = REAL_OBS_DIR / "U.fits"
+REAL_SUBEXPOSURES = REAL_OBS_DIR / "sw03000183001uuu_sk.img"
 
 HAS_REAL_DATA = REAL_IMAGE.is_file() and REAL_SUBEXPOSURES.is_file()
 HAS_SEXTRACTOR = shutil.which("sex") is not None
