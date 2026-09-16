@@ -11,7 +11,7 @@ DEFAULT_IMAGE_DIR = Path.home() / "swift_images"
 DEFAULT_DATA_DIR = Path.home() / "swiftcat_data"
 
 
-def _env_dir(env_var: str, default: Path) -> Path:
+def _get_directory_from_env(env_var: str, default: Path) -> Path:
     """
     Function to resolve a directory from an environment variable (or
     .env), falling back to a default if unset/blank, creating it if it
@@ -36,7 +36,7 @@ def get_image_dir() -> Path:
 
     :return: Path to the image directory
     """
-    return _env_dir("SWIFT_IMAGE_DIR", DEFAULT_IMAGE_DIR)
+    return _get_directory_from_env("SWIFT_IMAGE_DIR", DEFAULT_IMAGE_DIR)
 
 
 def get_data_dir() -> Path:
@@ -47,4 +47,4 @@ def get_data_dir() -> Path:
 
     :return: Path to the data directory
     """
-    return _env_dir("SWIFTCAT_DATA_DIR", DEFAULT_DATA_DIR)
+    return _get_directory_from_env("SWIFTCAT_DATA_DIR", DEFAULT_DATA_DIR)
