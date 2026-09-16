@@ -14,9 +14,12 @@ authors = [
 requires-python = ">=3.10"
 dependencies = [
     "astropy",
+    "matplotlib",
     "numpy",
+    "pandas",
     "scipy",
     "blastwave",
+    "python-dotenv",
 ]
 
 [project.optional-dependencies]
@@ -26,6 +29,7 @@ dev = [
     "pylint == 3.3.7",
     "coveralls",
     "pre-commit",
+    "regions",
 ]
 
 [project.urls]

@@ -1,0 +1,211 @@
+"""
+Module for rendering a quicklook raster image (e.g. JPEG) of a UVOT
+image with classified sources overlaid, colour-coded by category
+"""
+
+from pathlib import Path
+
+import matplotlib
+
+# Must run before importing pyplot, so a non-interactive backend is
+# picked up before matplotlib locks one in - needed for headless
+# pipeline/test runs with no display.
+matplotlib.use("Agg")
+
+# pylint: disable=wrong-import-position
+import matplotlib.pyplot as plt
+import numpy as np
+import pandas as pd
+from astropy.coordinates import SkyCoord
+from astropy.io import fits
+from astropy.visualization import ImageNormalize, ZScaleInterval
+from astropy.wcs import WCS
+from matplotlib.colors import to_rgba
+from matplotlib.lines import Line2D
+
+from swiftcat.detect import overlap_mask
+from swiftcat.utils.regions import (
+    CATEGORY_COL,
+    CATEGORY_COLORS,
+    DEC_COL,
+    DEFAULT_COLOR,
+    RA_COL,
+    RADIUS_COL,
+    RADIUS_SCALE,
+)
+
+# pylint: enable=wrong-import-position
+
+EXCLUDED_REGION_COLOR = "red"
+EXCLUDED_REGION_ALPHA = 0.5
+
+
+def load_image_data_and_wcs(image_path: Path) -> tuple[np.ndarray, WCS]:
+    """
+    Function to load the pixel data and WCS of a UVOT image's first
+    data-bearing extension
+
+    :param image_path: Path to the image
+    :return: (pixel data, WCS)
+    """
+    with fits.open(image_path) as hdul:
+        hdu = next(h for h in hdul if h.data is not None)
+        return hdu.data.astype(float), WCS(hdu.header)
+
+
+def get_title_info(image_path: Path) -> tuple[str, str, str]:
+    """
+    Function to read the target name, ID, and observation date from a
+    UVOT image's header
+
+    :param image_path: Path to the image
+    :return: (OBJECT, TARG_ID, observation date), as strings ("unknown"
+        if a keyword is missing)
+    """
+    with fits.open(image_path) as hdul:
+        hdu = next(h for h in hdul if h.data is not None)
+        header = hdu.header
+    obj = str(header.get("OBJECT", "unknown"))
+    targ_id = str(header.get("TARG_ID", "unknown"))
+    date_obs = header.get("DATE-OBS")
+    date = str(date_obs).split("T", maxsplit=1)[0] if date_obs else "unknown"
+    return obj, targ_id, date
+
+
+def get_source_pixel_positions(
+    sources: pd.DataFrame, wcs: WCS
+) -> tuple[np.ndarray, np.ndarray]:
+    """
+    Function to convert each source's sky position to pixel coordinates
+    in the given WCS
+
+    :param sources: Table of sources, needs ALPHA_J2000/DELTA_J2000
+    :param wcs: WCS to project into
+    :return: (x pixel positions, y pixel positions)
+    """
+    coords = SkyCoord(
+        ra=sources[RA_COL].to_numpy(), dec=sources[DEC_COL].to_numpy(), unit="deg"
+    )
+    return wcs.world_to_pixel(coords)
+
+
+def draw_source_circles(
+    ax: plt.Axes,
+    xs: np.ndarray,
+    ys: np.ndarray,
+    categories: pd.Series,
+    radii_pix: np.ndarray,
+) -> None:
+    """
+    Function to draw a colour-coded circle at each source's pixel
+    position, sized to that source's own radius and colour-coded by
+    category (matching write_region_file's colour scheme)
+
+    :param ax: Axes to draw on
+    :param xs: x pixel positions
+    :param ys: y pixel positions
+    :param categories: Classification of each source
+    :param radii_pix: Circle radius for each source, in pixels
+    :return: None
+    """
+    for x, y, category, radius in zip(xs, ys, categories, radii_pix):
+        color = CATEGORY_COLORS.get(category, DEFAULT_COLOR)
+        ax.add_patch(
+            plt.Circle((x, y), radius, edgecolor=color, facecolor="none", linewidth=1.4)
+        )
+
+
+def add_category_legend(ax: plt.Axes, categories: pd.Series) -> None:
+    """
+    Function to add a legend listing each category present, its colour,
+    and how many sources fall into it
+
+    :param ax: Axes to add the legend to
+    :param categories: Classification of each source
+    :return: None
+    """
+    handles = [
+        Line2D(
+            [],
+            [],
+            marker="o",
+            linestyle="none",
+            markerfacecolor="none",
+            markeredgecolor=CATEGORY_COLORS.get(category, DEFAULT_COLOR),
+            markersize=8,
+            label=f"{category} ({count})",
+        )
+        for category, count in categories.value_counts().items()
+    ]
+    ax.legend(
+        handles=handles,
+        loc="upper left",
+        bbox_to_anchor=(1.01, 1.0),
+        fontsize="small",
+        borderaxespad=0.0,
+    )
+
+
+def shade_excluded_region(ax: plt.Axes, mask: np.ndarray) -> None:
+    """
+    Function to shade, with a semi-transparent overlay, the part of an
+    image NOT covered by every sub-exposure - the region find_sources
+    drops detections from when given raw_subexposures
+
+    :param ax: Axes to draw on
+    :param mask: Boolean coverage mask, True where covered by every
+        sub-exposure (as returned by overlap_mask)
+    :return: None
+    """
+    overlay = np.zeros((*mask.shape, 4))
+    overlay[..., :3] = to_rgba(EXCLUDED_REGION_COLOR)[:3]
+    overlay[..., 3] = np.where(mask, 0.0, EXCLUDED_REGION_ALPHA)
+    ax.imshow(overlay, origin="lower")
+
+
+def plot_image_with_sources(
+    image_path: Path,
+    sources: pd.DataFrame,
+    raw_subexposures: Path | None = None,
+    out_path: Path | None = None,
+) -> Path:
+    """
+    Function to render a quicklook image of a UVOT observation with each
+    classified source circled, colour-coded by category (matching
+    write_region_file's colour scheme) and sized by its own FLUX_RADIUS,
+    titled with the target name/ID/date and legended (outside the image)
+    with per-category counts, and save it as a raster image - format is
+    inferred from out_path's extension (e.g. .jpg, .png)
+
+    :param image_path: Path to the image
+    :param sources: Table of sources, as produced by find_sources -
+        needs ALPHA_J2000/DELTA_J2000 (degrees), FLUX_RADIUS (pixels),
+        and category columns
+    :param raw_subexposures: Raw multi-extension sky image the summed
+        image was created from; if given, the region outside every
+        sub-exposure's coverage (as excluded by find_sources) is shaded
+    :param out_path: Path to save the plot to; defaults to image_path
+        with a .jpg extension
+    :return: Path the plot was saved to
+    """
+    if out_path is None:
+        out_path = image_path.with_suffix(".jpg")
+
+    data, wcs = load_image_data_and_wcs(image_path)
+    obj, targ_id, date = get_title_info(image_path)
+    xs, ys = get_source_pixel_positions(sources, wcs)
+    radii_pix = sources[RADIUS_COL].to_numpy() * RADIUS_SCALE
+
+    fig, ax = plt.subplots()
+    norm = ImageNormalize(data, interval=ZScaleInterval())
+    ax.imshow(data, origin="lower", cmap="gray", norm=norm)
+    if raw_subexposures is not None:
+        shade_excluded_region(ax, overlap_mask(wcs, data.shape, raw_subexposures))
+    draw_source_circles(ax, xs, ys, sources[CATEGORY_COL], radii_pix)
+    add_category_legend(ax, sources[CATEGORY_COL])
+    ax.set_title(f"{obj} (TARG_ID {targ_id}, {date})")
+    ax.set_axis_off()
+
+    fig.savefig(out_path, dpi=150, bbox_inches="tight")
+    plt.close(fig)
+    return out_path

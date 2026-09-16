@@ -4,7 +4,7 @@ Module to run the full per-image pipeline: detect, then tag against PS1
 
 from pathlib import Path
 
-from astropy.table import Table
+import pandas as pd
 from blastwave.query.boom import BoomClient
 
 from swiftcat.crossmatch import crossmatch_ps1
@@ -15,7 +15,7 @@ def detect_and_classify(
     image_path: Path,
     raw_subexposures: Path | None = None,
     client: BoomClient | None = None,
-) -> Table:
+) -> pd.DataFrame:
     """
     Function to detect every source in a UVOT image, restricted to the
     overlap region, and tag each as known_star / known_galaxy /
