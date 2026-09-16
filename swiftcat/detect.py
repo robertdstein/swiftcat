@@ -8,6 +8,7 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
+from astropy.coordinates import SkyCoord
 from astropy.io import fits
 from astropy.table import Table
 from astropy.wcs import WCS
@@ -25,6 +26,13 @@ MIN_FLUX_MAX = 5.0  # raw-count floor, on top of DETECT_THRESH sigma
 CLASS_STAR_MIN = 0.05
 ELLIPTICITY_MAX = 0.3
 EDGE_BUFFER_PIX = 10
+
+# check_failure tuning: how many of the brightest local maxima to check,
+# how close a catalog entry must be to count as found, and how many of
+# those brightest sources may go missing before flagging a failure.
+FAILURE_CHECK_N_BRIGHTEST = 8
+FAILURE_CHECK_MATCH_RADIUS_PIX = 15.0
+FAILURE_CHECK_MIN_MISSING = 2
 
 
 def run_sextractor(image_path: Path, out_cat: Path) -> tuple[pd.DataFrame, str]:
@@ -67,7 +75,30 @@ def run_sextractor(image_path: Path, out_cat: Path) -> tuple[pd.DataFrame, str]:
     return cat, log_text
 
 
-def overlap_mask(  # pylint: disable=too-many-locals
+def _sub_exposure_coverage(
+    sub_wcs: WCS, sky: SkyCoord, sub_data: np.ndarray
+) -> np.ndarray:
+    """
+    Function to check, for one sub-exposure, which of the given flattened
+    sky positions land on a nonzero pixel within that sub-exposure
+
+    :param sub_wcs: WCS of the sub-exposure
+    :param sky: Flattened sky positions to test
+    :param sub_data: Pixel data of the sub-exposure
+    :return: Boolean array (same length as sky), True where covered
+    """
+    px, py = sub_wcs.world_to_pixel(sky)
+    ix, iy = np.round(px).astype(int), np.round(py).astype(int)
+    in_bounds = (
+        (ix >= 0) & (ix < sub_data.shape[1]) & (iy >= 0) & (iy < sub_data.shape[0])
+    )
+    exposed = np.zeros(len(sky), dtype=bool)
+    idx = np.flatnonzero(in_bounds)
+    exposed[idx] = sub_data[iy[idx], ix[idx]] != 0
+    return exposed
+
+
+def overlap_mask(
     wcs: WCS, shape: tuple[int, int], raw_subexposures: Path
 ) -> np.ndarray:
     """
@@ -93,32 +124,14 @@ def overlap_mask(  # pylint: disable=too-many-locals
                 continue
             n_sub += 1
             sub_wcs = WCS(hdu.header)
-            px, py = sub_wcs.world_to_pixel(sky)
-            ix, iy = np.round(px).astype(int), np.round(py).astype(int)
-            in_bounds = (
-                (ix >= 0)
-                & (ix < hdu.data.shape[1])
-                & (iy >= 0)
-                & (iy < hdu.data.shape[0])
-            )
-            exposed = np.zeros(ny * nx, dtype=bool)
-            idx = np.flatnonzero(in_bounds)
-            exposed[idx] = hdu.data[iy[idx], ix[idx]] != 0
-            coverage += exposed.astype(int)
+            coverage += _sub_exposure_coverage(sub_wcs, sky, hdu.data).astype(int)
 
     if n_sub == 0:
         raise ValueError(f"No image extensions found in {raw_subexposures}")
     return coverage.reshape(ny, nx) == n_sub
 
 
-def check_failure(  # pylint: disable=too-many-arguments,too-many-positional-arguments
-    data: np.ndarray,
-    cat: pd.DataFrame,
-    log_text: str,
-    n_check: int = 8,
-    match_radius_px: float = 15.0,
-    min_missing: int = 2,
-) -> bool:
+def check_failure(data: np.ndarray, cat: pd.DataFrame, log_text: str) -> bool:
     """
     Function to flag a likely SExtractor detection failure - a hard-coded
     limit in SExtractor's deblender (NSONMAX=1024, see src/refine.c) can
@@ -130,11 +143,6 @@ def check_failure(  # pylint: disable=too-many-arguments,too-many-positional-arg
     :param data: Image data SExtractor was run on
     :param cat: SExtractor output catalog
     :param log_text: Combined stdout+stderr from run_sextractor
-    :param n_check: How many of the brightest local maxima to check
-    :param match_radius_px: A local max within this many pixels of a
-        catalog entry counts as found
-    :param min_missing: Flag only if at least this many of the n_check
-        brightest sources are missing (a single miss could be a hot pixel)
     :return: True if this image's catalog looks unreliable
     """
     if "Deblending overflow" in log_text or "Pixel stack overflow" in log_text:
@@ -142,20 +150,42 @@ def check_failure(  # pylint: disable=too-many-arguments,too-many-positional-arg
 
     local_max = maximum_filter(data, size=9)
     ys, xs = np.where((data == local_max) & (data > 0))
-    order = np.argsort(-data[ys, xs])[:n_check]
+    order = np.argsort(-data[ys, xs])[:FAILURE_CHECK_N_BRIGHTEST]
     cat_x, cat_y = np.asarray(cat["X_IMAGE"]) - 1, np.asarray(cat["Y_IMAGE"]) - 1
 
     n_missing = 0
     for i in order:
         if (
             len(cat_x) == 0
-            or np.min(np.hypot(cat_x - xs[i], cat_y - ys[i])) > match_radius_px
+            or np.min(np.hypot(cat_x - xs[i], cat_y - ys[i]))
+            > FAILURE_CHECK_MATCH_RADIUS_PIX
         ):
             n_missing += 1
-    return n_missing >= min_missing
+    return n_missing >= FAILURE_CHECK_MIN_MISSING
 
 
-def find_sources(  # pylint: disable=too-many-locals
+def _in_overlap_region(
+    cat: pd.DataFrame, mask: np.ndarray, shape: tuple[int, int]
+) -> np.ndarray:
+    """
+    Function to check which catalog detections land within a per-pixel
+    coverage mask
+
+    :param cat: SExtractor catalog (needs X_IMAGE, Y_IMAGE)
+    :param mask: Boolean coverage mask, from overlap_mask
+    :param shape: (ny, nx) of the image the mask covers
+    :return: Boolean array, True where a detection is in a covered pixel
+    """
+    ny, nx = shape
+    ix = np.round(cat["X_IMAGE"]).astype(int) - 1
+    iy = np.round(cat["Y_IMAGE"]).astype(int) - 1
+    valid = (ix >= 0) & (ix < nx) & (iy >= 0) & (iy < ny)
+    in_region = np.zeros(len(cat), dtype=bool)
+    in_region[valid] = mask[iy[valid], ix[valid]]
+    return in_region
+
+
+def find_sources(
     image_path: Path, raw_subexposures: Path | None = None
 ) -> pd.DataFrame:
     """
@@ -191,12 +221,7 @@ def find_sources(  # pylint: disable=too-many-locals
     )
     if raw_subexposures is not None:
         mask = overlap_mask(wcs, (ny, nx), raw_subexposures)
-        ix = np.round(cat["X_IMAGE"]).astype(int) - 1
-        iy = np.round(cat["Y_IMAGE"]).astype(int) - 1
-        valid = (ix >= 0) & (ix < nx) & (iy >= 0) & (iy < ny)
-        in_region = np.zeros(len(cat), dtype=bool)
-        in_region[valid] = mask[iy[valid], ix[valid]]
-        keep &= in_region
+        keep &= _in_overlap_region(cat, mask, (ny, nx))
     cat = cat.loc[keep].reset_index(drop=True)
 
     cat["is_point_source"] = (cat["CLASS_STAR"] >= CLASS_STAR_MIN) & (

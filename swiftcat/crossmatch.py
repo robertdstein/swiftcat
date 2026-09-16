@@ -38,7 +38,51 @@ def field_center_and_radius(
     return center, radius
 
 
-def crossmatch_ps1(  # pylint: disable=too-many-locals
+def _field_wcs_and_shape(image_path: Path) -> tuple[WCS, tuple[int, int]]:
+    """
+    Function to get the WCS and pixel shape of a UVOT image's first
+    data-bearing extension
+
+    :param image_path: Path to the image
+    :return: (WCS, (ny, nx))
+    """
+    with fits.open(image_path) as hdul:
+        hdu = next(h for h in hdul if h.data is not None)
+        return WCS(hdu.header), hdu.data.shape
+
+
+def _query_ps1(
+    wcs: WCS, shape: tuple[int, int], client: BoomClient
+) -> tuple[SkyCoord, np.ndarray]:
+    """
+    Function to cone-search PS1 around the field covered by an image
+
+    :param wcs: WCS of the image
+    :param shape: (ny, nx) of the image
+    :param client: BoomClient to query with
+    :return: (PS1 source positions, matching ps_score array)
+    """
+    center, radius = field_center_and_radius(wcs, shape)
+    results = client.cone_search(
+        ra=center.ra.deg,
+        dec=center.dec.deg,
+        radius_arcsec=radius.to_value(u.arcsec),  # pylint: disable=no-member
+        catalog=PS1_CATALOG,
+        limit=200_000,
+    )
+    ps1_coords = SkyCoord(
+        ra=[r["ra"] for r in results], dec=[r["dec"] for r in results], unit="deg"
+    )
+    ps_score = np.array(
+        [
+            r.get("ps_score") if r.get("ps_score") is not None else np.nan
+            for r in results
+        ]
+    )
+    return ps1_coords, ps_score
+
+
+def crossmatch_ps1(
     cat: pd.DataFrame, image_path: Path, client: BoomClient | None = None
 ) -> pd.DataFrame:
     """
@@ -50,32 +94,12 @@ def crossmatch_ps1(  # pylint: disable=too-many-locals
     :param client: Optional shared BoomClient
     :return: cat with an added `category` column
     """
-    with fits.open(image_path) as hdul:
-        hdu = next(h for h in hdul if h.data is not None)
-        wcs = WCS(hdu.header)
-        shape = hdu.data.shape
-
-    center, radius = field_center_and_radius(wcs, shape)
+    wcs, shape = _field_wcs_and_shape(image_path)
     client = client or BoomClient()
-    results = client.cone_search(
-        ra=center.ra.deg,
-        dec=center.dec.deg,
-        radius_arcsec=radius.to_value(u.arcsec),  # pylint: disable=no-member
-        catalog=PS1_CATALOG,
-        limit=200000,
-    )
-    ps1_coords = SkyCoord(
-        ra=[r["ra"] for r in results], dec=[r["dec"] for r in results], unit="deg"
-    )
-    ps_score = np.array(
-        [
-            r.get("ps_score") if r.get("ps_score") is not None else np.nan
-            for r in results
-        ]
-    )
+    ps1_coords, ps_score = _query_ps1(wcs, shape, client)
 
     category = np.full(len(cat), "new", dtype=object)
-    if len(cat) > 0 and len(results) > 0:
+    if len(cat) > 0 and len(ps1_coords) > 0:
         det_coords = SkyCoord(ra=cat["ALPHA_J2000"], dec=cat["DELTA_J2000"], unit="deg")
         idx, sep, _ = det_coords.match_to_catalog_sky(ps1_coords)
         is_known = sep < MATCH_RADIUS
