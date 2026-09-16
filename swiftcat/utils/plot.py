@@ -53,18 +53,23 @@ def load_image_data_and_wcs(image_path: Path) -> tuple[np.ndarray, WCS]:
         return hdu.data.astype(float), WCS(hdu.header)
 
 
-def get_object_and_target_id(image_path: Path) -> tuple[str, str]:
+def get_title_info(image_path: Path) -> tuple[str, str, str]:
     """
-    Function to read the target name and ID from a UVOT image's header
+    Function to read the target name, ID, and observation date from a
+    UVOT image's header
 
     :param image_path: Path to the image
-    :return: (OBJECT, TARG_ID), as strings ("unknown" if a keyword is
-        missing)
+    :return: (OBJECT, TARG_ID, observation date), as strings ("unknown"
+        if a keyword is missing)
     """
     with fits.open(image_path) as hdul:
         hdu = next(h for h in hdul if h.data is not None)
         header = hdu.header
-    return str(header.get("OBJECT", "unknown")), str(header.get("TARG_ID", "unknown"))
+    obj = str(header.get("OBJECT", "unknown"))
+    targ_id = str(header.get("TARG_ID", "unknown"))
+    date_obs = header.get("DATE-OBS")
+    date = str(date_obs).split("T", maxsplit=1)[0] if date_obs else "unknown"
+    return obj, targ_id, date
 
 
 def get_source_pixel_positions(
@@ -132,7 +137,13 @@ def add_category_legend(ax: plt.Axes, categories: pd.Series) -> None:
         )
         for category, count in categories.value_counts().items()
     ]
-    ax.legend(handles=handles, loc="upper right", fontsize="small", framealpha=0.7)
+    ax.legend(
+        handles=handles,
+        loc="upper left",
+        bbox_to_anchor=(1.01, 1.0),
+        fontsize="small",
+        borderaxespad=0.0,
+    )
 
 
 def shade_excluded_region(ax: plt.Axes, mask: np.ndarray) -> None:
@@ -162,9 +173,9 @@ def plot_image_with_sources(
     Function to render a quicklook image of a UVOT observation with each
     classified source circled, colour-coded by category (matching
     write_region_file's colour scheme) and sized by its own FLUX_RADIUS,
-    titled with the target name/ID and legended with per-category
-    counts, and save it as a raster image - format is inferred from
-    out_path's extension (e.g. .jpg, .png)
+    titled with the target name/ID/date and legended (outside the image)
+    with per-category counts, and save it as a raster image - format is
+    inferred from out_path's extension (e.g. .jpg, .png)
 
     :param image_path: Path to the image
     :param sources: Table of sources, as produced by find_sources -
@@ -181,7 +192,7 @@ def plot_image_with_sources(
         out_path = image_path.with_suffix(".jpg")
 
     data, wcs = load_image_data_and_wcs(image_path)
-    obj, targ_id = get_object_and_target_id(image_path)
+    obj, targ_id, date = get_title_info(image_path)
     xs, ys = get_source_pixel_positions(sources, wcs)
     radii_pix = sources[RADIUS_COL].to_numpy() * RADIUS_SCALE
 
@@ -192,7 +203,7 @@ def plot_image_with_sources(
         shade_excluded_region(ax, overlap_mask(wcs, data.shape, raw_subexposures))
     draw_source_circles(ax, xs, ys, sources[CATEGORY_COL], radii_pix)
     add_category_legend(ax, sources[CATEGORY_COL])
-    ax.set_title(f"{obj} (TARG_ID {targ_id})")
+    ax.set_title(f"{obj} (TARG_ID {targ_id}, {date})")
     ax.set_axis_off()
 
     fig.savefig(out_path, dpi=150, bbox_inches="tight")

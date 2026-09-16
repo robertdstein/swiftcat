@@ -12,7 +12,7 @@ from astropy.wcs.utils import proj_plane_pixel_scales
 
 DEFAULT_COLOR = "orange"
 CATEGORY_COLORS = {
-    "new": "red",
+    "new": "green",
     "known_star": "cyan",
     "known_galaxy": "magenta",
     "known_unclear": "yellow",

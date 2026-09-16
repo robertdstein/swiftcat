@@ -17,8 +17,8 @@ from swiftcat.utils.plot import (
     EXCLUDED_REGION_ALPHA,
     add_category_legend,
     draw_source_circles,
-    get_object_and_target_id,
     get_source_pixel_positions,
+    get_title_info,
     load_image_data_and_wcs,
     plot_image_with_sources,
     shade_excluded_region,
@@ -52,13 +52,12 @@ class TestLoadImageDataAndWcs(unittest.TestCase):
         self.assertEqual(wcs_out.wcs.ctype[0], "RA---TAN")
 
 
-class TestGetObjectAndTargetId(unittest.TestCase):
+class TestGetTitleInfo(unittest.TestCase):
     """
-    Class for testing get_object_and_target_id against a genuine FITS
-    file
+    Class for testing get_title_info against a genuine FITS file
     """
 
-    def test_reads_object_and_targ_id(self):
+    def test_reads_object_targ_id_and_date(self):
         """
         :return: None
         """
@@ -66,6 +65,7 @@ class TestGetObjectAndTargetId(unittest.TestCase):
         header = wcs.to_header()
         header["OBJECT"] = "AT2025abcr"
         header["TARG_ID"] = 3000183
+        header["DATE-OBS"] = "2025-11-09T14:52:19"
 
         with TemporaryDirectory() as tmp_dir:
             image_path = Path(tmp_dir) / "image.fits"
@@ -76,10 +76,11 @@ class TestGetObjectAndTargetId(unittest.TestCase):
                 ]
             ).writeto(image_path)
 
-            obj, targ_id = get_object_and_target_id(image_path)
+            obj, targ_id, date = get_title_info(image_path)
 
         self.assertEqual(obj, "AT2025abcr")
         self.assertEqual(targ_id, "3000183")
+        self.assertEqual(date, "2025-11-09")
 
     def test_missing_keywords_fall_back_to_unknown(self):
         """
@@ -91,10 +92,11 @@ class TestGetObjectAndTargetId(unittest.TestCase):
             image_path = Path(tmp_dir) / "image.fits"
             write_single_extension_fits(image_path, wcs)
 
-            obj, targ_id = get_object_and_target_id(image_path)
+            obj, targ_id, date = get_title_info(image_path)
 
         self.assertEqual(obj, "unknown")
         self.assertEqual(targ_id, "unknown")
+        self.assertEqual(date, "unknown")
 
 
 class TestAddCategoryLegend(unittest.TestCase):
@@ -115,6 +117,21 @@ class TestAddCategoryLegend(unittest.TestCase):
 
         labels = {t.get_text() for t in ax.get_legend().get_texts()}
         self.assertEqual(labels, {"known_star (3)", "new (1)", "known_galaxy (1)"})
+        plt.close("all")
+
+    def test_legend_is_positioned_outside_the_axes(self):
+        """
+        :return: None
+        """
+        fig, ax = plt.subplots()
+        categories = pd.Series(["new"])
+
+        add_category_legend(ax, categories)
+        fig.canvas.draw()
+
+        legend_bbox = ax.get_legend().get_window_extent()
+        axes_bbox = ax.get_window_extent()
+        self.assertGreaterEqual(legend_bbox.x0, axes_bbox.x1)
         plt.close("all")
 
 
@@ -158,7 +175,9 @@ class TestDrawSourceCircles(unittest.TestCase):
 
         patches = ax.patches
         self.assertEqual(len(patches), 2)
-        self.assertEqual(patches[0].get_edgecolor()[:3], (1.0, 0.0, 0.0))  # red
+        self.assertEqual(
+            patches[0].get_edgecolor()[:3], (0.0, 0.50196078431372548, 0.0)
+        )  # green
         self.assertEqual(patches[1].get_edgecolor()[:3], (0.0, 1.0, 1.0))  # cyan
         self.assertEqual(patches[0].radius, 5.0)
         self.assertEqual(patches[1].radius, 8.0)
