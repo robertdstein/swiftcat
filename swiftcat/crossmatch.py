@@ -13,6 +13,7 @@ from astropy.coordinates import SkyCoord
 from astropy.io import fits
 from astropy.wcs import WCS
 from blastwave.query.boom import BoomClient
+from dotenv import load_dotenv
 
 PS1_CATALOG = "PS1_DR2"
 MATCH_RADIUS = 1.5 * u.arcsec  # pylint: disable=no-member
@@ -62,6 +63,12 @@ def query_ps1_catalog(
     :param client: BoomClient to query with
     :return: (PS1 source positions, matching ps_score array)
     """
+    # BoomClient reads its credentials via its own load_dotenv() call,
+    # which resolves relative to wherever blastwave itself is installed
+    # (e.g. site-packages) rather than this project, so it can't find
+    # this project's .env on its own. Loading it here first means the
+    # credentials are already in os.environ by the time BoomClient looks.
+    load_dotenv()
     center, radius = field_center_and_radius(wcs, shape)
     results = client.cone_search(
         ra=center.ra.deg,
